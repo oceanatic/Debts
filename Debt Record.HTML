@@ -93,6 +93,27 @@
     .menuCard{ max-width:520px; width:100%; }
     .menuBtns{ display:grid; gap:10px; grid-template-columns: 1fr; }
     @media(min-width:560px){ .menuBtns{ grid-template-columns: 1fr 1fr; } }
+
+    /* Viewer breakdown row */
+    .breakRow td { padding: 0; }
+    .breakBox{
+      padding:12px;
+      background:#0f1724;
+      border-top:1px solid rgba(35,48,67,.6);
+    }
+    .portion{
+      display:flex;
+      gap:10px;
+      align-items:flex-start;
+      justify-content:space-between;
+      padding:8px 10px;
+      border:1px solid rgba(35,48,67,.8);
+      border-radius:12px;
+      margin:8px 0;
+      background:#0b1320;
+    }
+    .portion .left{ flex:1 1 auto; }
+    .portion .amt{ flex:0 0 auto; font-weight:800; }
   </style>
 </head>
 <body>
@@ -158,7 +179,7 @@
         <div class="stats" style="margin-top:12px;">
           <div class="stat">
             <div class="k">Total Debt</div>
-            <div class="v" id="viewTotal">$0.00</div>
+            <div class="v" id="viewTotal">$0</div>
           </div>
           <div class="stat">
             <div class="k">People With Debts</div>
@@ -171,7 +192,7 @@
             <thead>
               <tr>
                 <th style="width:30%;">Person</th>
-                <th style="width:20%;">Balance</th>
+                <th style="width:20%;">Debt</th>
                 <th>Notes</th>
               </tr>
             </thead>
@@ -181,7 +202,7 @@
       </div>
     </div>
 
-    <!-- ADMIN PANEL VIEW (your existing UI) -->
+    <!-- ADMIN PANEL VIEW -->
     <div id="adminPanelView" class="hidden">
       <div class="inline" style="align-items:end; margin-bottom:12px;">
         <div style="flex:2 1 260px;">
@@ -196,15 +217,15 @@
       <div class="grid">
         <!-- LEFT: Forms -->
         <div class="card">
-          <h2 style="margin:0 0 10px; font-size:18px;">Add / Update Debt</h2>
+          <h2 style="margin:0 0 10px; font-size:18px;">Add Debt Portion</h2>
 
           <label>Person</label>
           <input id="person" placeholder="Name" />
 
           <div class="row">
             <div>
-              <label>Amount Owed</label>
-              <input id="amount" type="number" step="0.01" min="0" placeholder="Amount" />
+              <label>Amount</label>
+              <input id="amount" type="number" step="1" min="0" inputmode="numeric" placeholder="Amount" />
             </div>
             <div>
               <label>Due Date (optional)</label>
@@ -212,23 +233,26 @@
             </div>
           </div>
 
-          <label>Note (optional)</label>
-          <input id="note" placeholder="Note" />
+          <label>Portion Note (optional)</label>
+          <input id="note" placeholder="Note for this portion" />
 
-          <button class="btn" id="addBtn">Add / Increase Debt</button>
+          <button class="btn" id="addBtn">Add Portion</button>
           <button class="btn secondary" id="clearFormBtn">Clear Form</button>
 
           <hr style="border:none; border-top:1px solid var(--line); margin:16px 0;">
 
-          <h2 style="margin:0 0 10px; font-size:18px;">Log a Payment</h2>
+          <h2 style="margin:0 0 10px; font-size:18px;">Log a Payment (Specific Portion)</h2>
 
           <label>Person</label>
           <select id="payPerson"></select>
 
+          <label>Debt Portion</label>
+          <select id="payPortion"></select>
+
           <div class="row">
             <div>
               <label>Payment Amount</label>
-              <input id="payAmount" type="number" step="0.01" min="0" placeholder="Amount" />
+              <input id="payAmount" type="number" step="1" min="0" inputmode="numeric" placeholder="Amount" />
             </div>
             <div>
               <label>Payment Date</label>
@@ -277,7 +301,7 @@
           <div class="stats" style="margin-top:12px;">
             <div class="stat">
               <div class="k">Total Owed To You</div>
-              <div class="v" id="totalOwed">$0.00</div>
+              <div class="v" id="totalOwed">$0</div>
             </div>
             <div class="stat">
               <div class="k">People With Debts</div>
@@ -289,10 +313,10 @@
             <table>
               <thead>
                 <tr>
-                  <th style="width:18%;">Person</th>
+                  <th style="width:22%;">Person</th>
                   <th style="width:16%;">Balance</th>
                   <th style="width:16%;">Due</th>
-                  <th>Notes</th>
+                  <th>Breakdown</th>
                   <th style="width:18%;">Actions</th>
                 </tr>
               </thead>
@@ -310,59 +334,110 @@
 
   <script>
     // -----------------------------
-    // "Security" note:
-    // This password gate is NOT secure. It's only UI protection.
+    // NOTE: Front-end password gate is not real security.
     // -----------------------------
     const ADMIN_PASSWORD = "Jj8808520@";
-
-    // -----------------------------
-    // Simple IOU Tracker (localStorage)
-    // -----------------------------
-    const STORAGE_KEY = "iou_tracker_v1";
+    const STORAGE_KEY = "iou_tracker_v2_portions";
 
     let state = loadState();
+    migrateIfNeeded();
 
-    // Helpers
     const el = (id) => document.getElementById(id);
+
     function show(id){
       ["homeView","adminLoginView","viewDebtsView","adminPanelView"].forEach(v => el(v).classList.add("hidden"));
       el(id).classList.remove("hidden");
     }
+
+    // NO CENTS: always whole dollars, no .00 ever
     function money(n){
-      const v = Number(n || 0);
-      const abs = Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const v = Math.round(Number(n || 0));
+      const abs = Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 0 });
       return (v < 0 ? "-$" : "$") + abs;
     }
+
     function normName(name){ return (name || "").trim(); }
     function keyFor(name){ return normName(name).toLowerCase(); }
-    function round2(x){ return Math.round((Number(x) + Number.EPSILON) * 100) / 100; }
     function escapeHtml(str){
       return String(str)
         .replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")
         .replaceAll('"',"&quot;").replaceAll("'","&#039;");
     }
 
+    function uuid(){
+      return (crypto?.randomUUID ? crypto.randomUUID() : ("p_" + Date.now() + "_" + Math.random().toString(16).slice(2)));
+    }
+
+    function totalBalance(person){
+      const portions = Array.isArray(person.portions) ? person.portions : [];
+      return portions.reduce((s,pt)=> s + Math.round(Number(pt.amount)||0), 0);
+    }
+
     function loadState(){
       try{
         const raw = localStorage.getItem(STORAGE_KEY);
-        if(!raw) return { people:{}, log:[] };
-        const parsed = JSON.parse(raw);
-        if(!parsed.people) parsed.people = {};
-        if(!parsed.log) parsed.log = [];
-        return parsed;
+        if(raw){
+          const parsed = JSON.parse(raw);
+          if(!parsed.people) parsed.people = {};
+          if(!parsed.log) parsed.log = [];
+          return parsed;
+        }
+
+        const oldRaw = localStorage.getItem("iou_tracker_v1");
+        if(oldRaw){
+          const old = JSON.parse(oldRaw);
+          return { people: old.people || {}, log: old.log || [], _needsMigration: true };
+        }
+
+        return { people:{}, log:[] };
       }catch(e){
         return { people:{}, log:[] };
       }
     }
-    function saveState(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+
+    function saveState(){
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+
     function pushLog(entry){
       state.log.unshift(entry);
       state.log = state.log.slice(0, 60);
     }
 
-    // -----------------------------
+    function migrateIfNeeded(){
+      if(!state._needsMigration) return;
+
+      const newPeople = {};
+      for(const k of Object.keys(state.people || {})){
+        const p = state.people[k];
+        const bal = Math.round(Number(p.balance || 0));
+        const n = p.name || k;
+        const due = p.due || "";
+        const note = p.note || "";
+
+        const portions = [];
+        if(bal > 0 || note){
+          portions.push({
+            id: uuid(),
+            amount: bal,
+            note: note || "",
+            createdAt: Date.now()
+          });
+        }
+
+        newPeople[k] = {
+          name: n,
+          due: due,
+          portions: portions,
+          updatedAt: p.updatedAt || Date.now()
+        };
+      }
+      state.people = newPeople;
+      delete state._needsMigration;
+      saveState();
+    }
+
     // Navigation wiring
-    // -----------------------------
     el("goViewBtn").addEventListener("click", () => { show("viewDebtsView"); renderView(); });
     el("goAdminBtn").addEventListener("click", () => { show("adminLoginView"); el("adminPass").focus(); });
 
@@ -379,16 +454,14 @@
         el("adminPass").value = "";
         el("adminLoginMsg").textContent = "";
         show("adminPanelView");
-        renderAdmin();      // ensure UI is up to date
-        renderView();       // keep view side consistent too
+        renderAdmin();
+        renderView();
       } else {
         el("adminLoginMsg").textContent = "Wrong password.";
       }
     }
 
-    // -----------------------------
-    // ADMIN: wire your existing logic (same IDs, same features)
-    // -----------------------------
+    // ADMIN elements
     const person = el("person");
     const amount = el("amount");
     const due = el("due");
@@ -397,6 +470,7 @@
     const clearFormBtn = el("clearFormBtn");
 
     const payPerson = el("payPerson");
+    const payPortion = el("payPortion");
     const payAmount = el("payAmount");
     const payDate = el("payDate");
     const payNote = el("payNote");
@@ -416,9 +490,15 @@
 
     payDate.valueAsDate = new Date();
 
-    addBtn.addEventListener("click", () => upsertDebt(person.value, amount.value, due.value, note.value));
+    addBtn.addEventListener("click", () => addPortion(person.value, amount.value, due.value, note.value));
     clearFormBtn.addEventListener("click", clearAddForm);
-    payBtn.addEventListener("click", () => applyPayment(payPerson.value, payAmount.value, payDate.value, payNote.value));
+
+    payBtn.addEventListener("click", () => applyPaymentSpecific(payPerson.value, payPortion.value, payAmount.value, payDate.value, payNote.value));
+
+    payPerson.addEventListener("change", () => {
+      populatePortionsForPayment(payPerson.value);
+    });
+
     search.addEventListener("input", renderAdmin);
     sort.addEventListener("change", renderAdmin);
 
@@ -452,6 +532,7 @@
         if(!incoming.people) incoming.people = {};
         if(!incoming.log) incoming.log = [];
         state = incoming;
+        migrateIfNeeded();
         saveState();
         renderAdmin();
         renderView();
@@ -471,48 +552,76 @@
       renderView();
     });
 
-    function upsertDebt(name, addAmount, dueDate, noteText){
+    function ensurePersonRecord(name, dueDate){
       const n = normName(name);
-      if(!n) return alert("Enter a person's name.");
-      const a = Number(addAmount);
-      if(!(a > 0)) return alert("Amount must be greater than 0.");
-
       const k = keyFor(n);
       if(!state.people[k]){
-        state.people[k] = { name:n, balance:0, due:"", note:"", updatedAt: Date.now() };
+        state.people[k] = { name:n, due:"", portions:[], updatedAt: Date.now() };
       }
-
-      state.people[k].balance = round2(state.people[k].balance + a);
+      if(!Array.isArray(state.people[k].portions)) state.people[k].portions = [];
       if(dueDate) state.people[k].due = dueDate;
-      if(noteText) state.people[k].note = mergeNotes(state.people[k].note, noteText);
       state.people[k].updatedAt = Date.now();
+      return k;
+    }
 
-      pushLog({ ts: Date.now(), type:"add", name:n, amount:a, note: noteText || "" });
+    function addPortion(name, amt, dueDate, noteText){
+      const n = normName(name);
+      if(!n) return alert("Enter a person's name.");
+      const a = Math.round(Number(amt));
+      if(!(a > 0)) return alert("Amount must be greater than 0.");
+
+      const k = ensurePersonRecord(n, dueDate);
+
+      state.people[k].portions.push({
+        id: uuid(),
+        amount: a,
+        note: (noteText || "").trim(),
+        createdAt: Date.now()
+      });
+
+      pushLog({ ts: Date.now(), type:"add", name:n, amount:a, note: (noteText || "") });
       saveState();
       renderAdmin();
       renderView();
       clearAddForm();
     }
 
-    function applyPayment(nameKey, payAmt, dateStr, noteText){
-      const k = nameKey;
+    function applyPaymentSpecific(personKey, portionId, amt, dateStr, noteText){
+      const k = personKey;
       if(!k || !state.people[k]) return alert("Pick a person.");
-      const a = Number(payAmt);
+      const a = Math.round(Number(amt));
       if(!(a > 0)) return alert("Payment must be greater than 0.");
+      if(!portionId) return alert("Pick a portion.");
 
       const p = state.people[k];
-      p.balance = round2(p.balance - a);
-      if(p.balance < 0) p.balance = 0;
+      const pt = (p.portions || []).find(x => x.id === portionId);
+      if(!pt) return alert("That portion no longer exists.");
+
+      pt.amount = Math.round(Number(pt.amount || 0) - a);
+      if(pt.amount < 0) pt.amount = 0;
+
       p.updatedAt = Date.now();
 
       const dateNote = dateStr ? ` (${dateStr})` : "";
-      pushLog({ ts: Date.now(), type:"pay", name:p.name, amount:a, note: (noteText || "") + dateNote });
+      const portionLabel = pt.note ? ` [${pt.note}]` : " [portion]";
+      pushLog({
+        ts: Date.now(),
+        type:"pay",
+        name: p.name,
+        amount: a,
+        note: (noteText || "") + portionLabel + dateNote
+      });
+
+      // remove zero-amount portions to reduce clutter
+      p.portions = (p.portions || []).filter(x => Number(x.amount || 0) > 0);
 
       saveState();
       renderAdmin();
       renderView();
+
       payAmount.value = "";
       payNote.value = "";
+      populatePortionsForPayment(payPerson.value);
     }
 
     function editPerson(k){
@@ -527,17 +636,13 @@
       const newDue = prompt("Edit due date (YYYY-MM-DD) or blank:", p.due || "");
       if(newDue === null) return;
 
-      const newNote = prompt("Edit note:", p.note || "");
-      if(newNote === null) return;
-
       if(newKey !== k){
         if(state.people[newKey]) return alert("That name already exists.");
         delete state.people[k];
-        state.people[newKey] = { ...p, name: trimmed, due: (newDue||"").trim(), note: newNote, updatedAt: Date.now() };
+        state.people[newKey] = { ...p, name: trimmed, due: (newDue||"").trim(), updatedAt: Date.now() };
       }else{
         p.name = trimmed;
         p.due = (newDue||"").trim();
-        p.note = newNote;
         p.updatedAt = Date.now();
       }
 
@@ -549,21 +654,12 @@
 
     function deletePerson(k){
       const p = state.people[k];
-      if(!confirm(`Delete ${p.name}? This removes their balance and history entry.`)) return;
+      if(!confirm(`Delete ${p.name}? This removes their debt portions and history entry.`)) return;
       delete state.people[k];
       pushLog({ ts: Date.now(), type:"delete", name: p.name, amount: 0, note: "Deleted person" });
       saveState();
       renderAdmin();
       renderView();
-    }
-
-    function mergeNotes(oldNote, newNote){
-      const o = (oldNote || "").trim();
-      const n = (newNote || "").trim();
-      if(!o) return n;
-      if(!n) return o;
-      if(o.toLowerCase() === n.toLowerCase()) return o;
-      return o + " • " + n;
     }
 
     function clearAddForm(){
@@ -575,15 +671,16 @@
 
     function renderAdmin(){
       renderPaySelect();
-      renderTable();
-      renderStats();
+      renderAdminTable();
+      renderAdminStats();
       renderLog();
+      populatePortionsForPayment(payPerson.value);
     }
 
     function renderPaySelect(){
       const keys = Object.keys(state.people);
       const entries = keys
-        .map(k => ({ k, ...state.people[k] }))
+        .map(k => ({ k, ...state.people[k], balance: totalBalance(state.people[k]) }))
         .filter(p => p.balance > 0)
         .sort((a,b) => a.name.localeCompare(b.name));
 
@@ -601,14 +698,50 @@
       }
     }
 
-    function getFilteredSortedPeople(){
+    function populatePortionsForPayment(personKey){
+      payPortion.innerHTML = "";
+      const k = personKey;
+      if(!k || !state.people[k]){
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "Select person first…";
+        payPortion.appendChild(opt);
+        return;
+      }
+
+      const p = state.people[k];
+      const live = (p.portions || []).filter(pt => Number(pt.amount||0) > 0);
+
+      if(!live.length){
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "No portions with balance";
+        payPortion.appendChild(opt);
+        return;
+      }
+
+      for(const pt of live){
+        const opt = document.createElement("option");
+        opt.value = pt.id;
+        const label = (pt.note || "").trim() ? pt.note.trim() : "—";
+        opt.textContent = `${money(pt.amount)} — ${label}`;
+        payPortion.appendChild(opt);
+      }
+    }
+
+    function getFilteredSortedPeopleAdmin(){
       const q = (search.value || "").trim().toLowerCase();
 
-      let arr = Object.keys(state.people).map(k => ({ k, ...state.people[k] }));
+      let arr = Object.keys(state.people).map(k => {
+        const p = state.people[k];
+        const portionsText = (p.portions || []).map(pt => pt.note || "").join(" ").toLowerCase();
+        return { k, ...p, balance: totalBalance(p), _portionsText: portionsText };
+      });
+
       if(q){
         arr = arr.filter(p =>
           p.name.toLowerCase().includes(q) ||
-          (p.note || "").toLowerCase().includes(q)
+          (p._portionsText || "").includes(q)
         );
       }
 
@@ -626,8 +759,8 @@
       return arr;
     }
 
-    function renderTable(){
-      const arr = getFilteredSortedPeople();
+    function renderAdminTable(){
+      const arr = getFilteredSortedPeopleAdmin();
 
       tbody.innerHTML = "";
       if(arr.length === 0){
@@ -638,12 +771,17 @@
       }
 
       for(const p of arr){
+        const breakdown = (p.portions || [])
+          .filter(pt => Number(pt.amount || 0) > 0)
+          .map(pt => `${money(pt.amount)} — ${escapeHtml((pt.note || "").trim() || "—")}`)
+          .join("<br>");
+
         const tr = document.createElement("tr");
         tr.innerHTML = `
           <td><b>${escapeHtml(p.name)}</b><div class="small muted">${escapeHtml(p.k)}</div></td>
           <td class="nowrap"><span class="pill">${money(p.balance)}</span></td>
           <td class="nowrap">${p.due ? escapeHtml(p.due) : `<span class="muted">—</span>`}</td>
-          <td>${p.note ? escapeHtml(p.note) : `<span class="muted">—</span>`}</td>
+          <td>${breakdown || `<span class="muted">—</span>`}</td>
           <td>
             <div class="actions">
               <button class="btn secondary" data-act="edit" data-k="${escapeHtml(p.k)}">Edit</button>
@@ -655,10 +793,10 @@
       }
     }
 
-    function renderStats(){
+    function renderAdminStats(){
       const arr = Object.values(state.people);
-      const totalAmt = arr.reduce((sum,p)=> sum + (Number(p.balance)||0), 0);
-      const countAmt = arr.filter(p => (Number(p.balance)||0) > 0).length;
+      const totalAmt = arr.reduce((sum,p)=> sum + totalBalance(p), 0);
+      const countAmt = arr.filter(p => totalBalance(p) > 0).length;
       totalOwed.textContent = money(totalAmt);
       peopleCount.textContent = String(countAmt);
     }
@@ -687,9 +825,7 @@
       }
     }
 
-    // -----------------------------
-    // VIEW MODE (read-only)
-    // -----------------------------
+    // VIEW MODE
     const viewSearch = el("viewSearch");
     const viewSort = el("viewSort");
     const viewTbody = el("viewTbody");
@@ -699,11 +835,55 @@
     viewSearch.addEventListener("input", renderView);
     viewSort.addEventListener("change", renderView);
 
+    viewTbody.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-act='toggle']");
+      if(!btn) return;
+
+      const k = btn.getAttribute("data-k");
+      const tr = btn.closest("tr");
+      const next = tr.nextElementSibling;
+
+      if(next && next.classList.contains("breakRow")){
+        next.remove();
+        btn.textContent = "Click for breakdown";
+        return;
+      }
+
+      const p = state.people[k];
+      if(!p) return;
+
+      const portions = (p.portions || []).filter(pt => Number(pt.amount||0) > 0);
+      const lines = portions.length ? portions.map(pt => `
+        <div class="portion">
+          <div class="left">
+            <div><b>${escapeHtml((pt.note || "").trim() || "—")}</b></div>
+          </div>
+          <div class="amt">${money(pt.amount)}</div>
+        </div>
+      `).join("") : `<div class="muted small">No portions (everything paid or none added).</div>`;
+
+      const html = `
+        <tr class="breakRow">
+          <td colspan="3">
+            <div class="breakBox">
+              <div class="small muted">Breakdown for <b>${escapeHtml(p.name)}</b></div>
+              ${lines}
+            </div>
+          </td>
+        </tr>
+      `;
+      tr.insertAdjacentHTML("afterend", html);
+      btn.textContent = "Hide breakdown";
+    });
+
     function renderView(){
       const q = (viewSearch.value || "").trim().toLowerCase();
 
-      let arr = Object.keys(state.people).map(k => ({ k, ...state.people[k] }));
-      // only show balances > 0
+      let arr = Object.keys(state.people).map(k => {
+        const p = state.people[k];
+        return { k, ...p, balance: totalBalance(p) };
+      });
+
       arr = arr.filter(p => Number(p.balance || 0) > 0);
 
       if(q){
@@ -726,7 +906,7 @@
       viewTbody.innerHTML = "";
       if(arr.length === 0){
         const tr = document.createElement("tr");
-        tr.innerHTML = `<td colspan="2" class="muted">No balances to show.</td>`;
+        tr.innerHTML = `<td colspan="3" class="muted">No balances to show.</td>`;
         viewTbody.appendChild(tr);
         return;
       }
@@ -736,17 +916,15 @@
         tr.innerHTML = `
           <td><b>${escapeHtml(p.name)}</b></td>
           <td class="nowrap"><span class="pill">${money(p.balance)}</span></td>
-          <td>${p.note ? escapeHtml(p.note) : `<span class="muted">—</span>`}</td>
+          <td>
+            <button class="btn secondary" data-act="toggle" data-k="${escapeHtml(p.k)}" style="margin-top:0;">Click for breakdown</button>
+          </td>
         `;
         viewTbody.appendChild(tr);
       }
     }
 
-    // Initial view
     show("homeView");
   </script>
 </body>
 </html>
-
-
-
