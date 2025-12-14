@@ -736,6 +736,7 @@
         tr.innerHTML = `
           <td><b>${escapeHtml(p.name)}</b></td>
           <td class="nowrap"><span class="pill">${money(p.balance)}</span></td>
+          <td>${p.note ? escapeHtml(p.note) : `<span class="muted">—</span>`}</td>
         `;
         viewTbody.appendChild(tr);
       }
@@ -746,5 +747,6 @@
   </script>
 </body>
 </html>
+
 
 
