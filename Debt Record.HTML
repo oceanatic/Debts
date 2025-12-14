@@ -1,0 +1,747 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Debts</title>
+  <style>
+    :root { --bg:#0b0f17; --card:#121a26; --muted:#93a4b8; --text:#e6edf7; --line:#233043; }
+    *{ box-sizing:border-box; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    body{ margin:0; background:linear-gradient(120deg,#0b0f17,#0a1322); color:var(--text); }
+    .wrap{ max-width:1100px; margin:0 auto; padding:24px; }
+    h1{ margin:0 0 8px; font-size:28px; }
+    .sub{ color:var(--muted); margin:0 0 18px; }
+    .grid{ display:grid; gap:14px; grid-template-columns: 1fr; }
+    @media (min-width: 900px){ .grid{ grid-template-columns: 420px 1fr; align-items:start; } }
+    .card{ background:rgba(18,26,38,.92); border:1px solid var(--line); border-radius:16px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.25); }
+    label{ display:block; font-size:12px; color:var(--muted); margin:10px 0 6px; }
+    input, select, button, textarea{
+      width:100%;
+      border-radius:12px;
+      border:1px solid var(--line);
+      background:#0f1724;
+      color:var(--text);
+      padding:10px 12px;
+      outline:none;
+    }
+    input:focus, select:focus, textarea:focus{ border-color:#3a5c89; }
+    .row{ display:grid; gap:10px; grid-template-columns: 1fr 1fr; }
+    .btn{
+      cursor:pointer;
+      border:none;
+      background:linear-gradient(135deg,#2f6fed,#2cc7a8);
+      padding:11px 12px;
+      font-weight:700;
+      margin-top:12px;
+    }
+    .btn.secondary{ background:#0f1724; border:1px solid var(--line); font-weight:600; }
+    .btn.danger{ background:linear-gradient(135deg,#ff4d6d,#ff9f43); }
+    .inline{ display:flex; gap:10px; flex-wrap:wrap; }
+    .inline > *{ flex:1 1 160px; }
+    .stats{ display:grid; gap:10px; grid-template-columns: 1fr 1fr; }
+    .stat{ border:1px solid var(--line); border-radius:14px; padding:12px; background:#0f1724; }
+    .stat .k{ font-size:12px; color:var(--muted); }
+    .stat .v{ font-size:18px; font-weight:800; margin-top:6px; }
+    table{ width:100%; border-collapse:separate; border-spacing:0; overflow:hidden; border-radius:14px; border:1px solid var(--line); }
+    thead th{
+      text-align:left;
+      font-size:12px;
+      color:var(--muted);
+      background:#0f1724;
+      padding:10px;
+      border-bottom:1px solid var(--line);
+    }
+    tbody td{
+      padding:10px;
+      border-bottom:1px solid rgba(35,48,67,.6);
+      vertical-align:top;
+    }
+    tbody tr:last-child td{ border-bottom:none; }
+    .pill{
+      display:inline-block;
+      padding:4px 10px;
+      border-radius:999px;
+      font-size:12px;
+      border:1px solid var(--line);
+      background:#0f1724;
+      color:var(--muted);
+    }
+    .actions{ display:flex; gap:8px; }
+    .actions button{ width:auto; padding:8px 10px; border-radius:10px; }
+    .small{ font-size:12px; color:var(--muted); }
+    .muted{ color:var(--muted); }
+    .nowrap{ white-space:nowrap; }
+    .log{
+      max-height:240px; overflow:auto;
+      border:1px solid var(--line);
+      border-radius:14px;
+      background:#0f1724;
+      padding:10px;
+    }
+    .logitem{ padding:8px; border-bottom:1px solid rgba(35,48,67,.6); }
+    .logitem:last-child{ border-bottom:none; }
+    .logitem b{ color:var(--text); }
+
+    /* Views */
+    .hidden{ display:none !important; }
+    .center{
+      min-height: calc(100vh - 48px);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .menuCard{ max-width:520px; width:100%; }
+    .menuBtns{ display:grid; gap:10px; grid-template-columns: 1fr; }
+    @media(min-width:560px){ .menuBtns{ grid-template-columns: 1fr 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+    <!-- HOME VIEW -->
+    <div id="homeView" class="center">
+      <div class="card menuCard">
+        <h1>Debts</h1>
+        <p class="sub">Choose a mode</p>
+        <div class="menuBtns">
+          <button class="btn" id="goViewBtn">View Debts</button>
+          <button class="btn secondary" id="goAdminBtn">Admin Panel</button>
+        </div>
+        <p class="small" style="margin-top:12px;">
+          Note: Password protection here is UI-only (not real security).
+        </p>
+      </div>
+    </div>
+
+    <!-- ADMIN LOGIN VIEW -->
+    <div id="adminLoginView" class="center hidden">
+      <div class="card menuCard">
+        <h1>Admin Panel</h1>
+        <p class="sub">Enter password to continue</p>
+        <label>Password</label>
+        <input id="adminPass" type="password" placeholder="Password" />
+        <button class="btn" id="adminLoginBtn">Enter</button>
+        <button class="btn secondary" id="backFromLoginBtn">Back</button>
+        <p class="small muted" id="adminLoginMsg" style="margin-top:10px;"></p>
+      </div>
+    </div>
+
+    <!-- VIEW DEBTS VIEW -->
+    <div id="viewDebtsView" class="hidden">
+      <div class="inline" style="align-items:end; margin-bottom:12px;">
+        <div style="flex:2 1 260px;">
+          <h1 style="margin:0;">How much do you owe me?</h1>
+          <p class="sub" style="margin:6px 0 0;">Probably a lot...</p>
+        </div>
+        <div style="flex:1 1 160px;">
+          <button class="btn secondary" id="backFromViewBtn" style="margin-top:0;">Back</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="inline" style="align-items:end;">
+          <div style="flex:2 1 260px;">
+            <label>Search</label>
+            <input id="viewSearch" placeholder="Search..." />
+          </div>
+          <div style="flex:1 1 180px;">
+            <label>Sort</label>
+            <select id="viewSort">
+              <option value="balanceDesc">Balance (high → low)</option>
+              <option value="balanceAsc">Balance (low → high)</option>
+              <option value="nameAsc">Name (A → Z)</option>
+              <option value="nameDesc">Name (Z → A)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="stats" style="margin-top:12px;">
+          <div class="stat">
+            <div class="k">Total Debt</div>
+            <div class="v" id="viewTotal">$0.00</div>
+          </div>
+          <div class="stat">
+            <div class="k">People With Debts</div>
+            <div class="v" id="viewCount">0</div>
+          </div>
+        </div>
+
+        <div style="margin-top:12px; overflow:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:60%;">Person</th>
+                <th>Balance</th>
+              </tr>
+            </thead>
+            <tbody id="viewTbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ADMIN PANEL VIEW (your existing UI) -->
+    <div id="adminPanelView" class="hidden">
+      <div class="inline" style="align-items:end; margin-bottom:12px;">
+        <div style="flex:2 1 260px;">
+          <h1 style="margin:0;">Admin Panel</h1>
+          <p class="sub" style="margin:6px 0 0;">Time to make some money</p>
+        </div>
+        <div style="flex:1 1 160px;">
+          <button class="btn secondary" id="backFromAdminBtn" style="margin-top:0;">Back</button>
+        </div>
+      </div>
+
+      <div class="grid">
+        <!-- LEFT: Forms -->
+        <div class="card">
+          <h2 style="margin:0 0 10px; font-size:18px;">Add / Update Debt</h2>
+
+          <label>Person</label>
+          <input id="person" placeholder="Name" />
+
+          <div class="row">
+            <div>
+              <label>Amount Owed</label>
+              <input id="amount" type="number" step="0.01" min="0" placeholder="Amount" />
+            </div>
+            <div>
+              <label>Due Date (optional)</label>
+              <input id="due" type="date" />
+            </div>
+          </div>
+
+          <label>Note (optional)</label>
+          <input id="note" placeholder="Note" />
+
+          <button class="btn" id="addBtn">Add / Increase Debt</button>
+          <button class="btn secondary" id="clearFormBtn">Clear Form</button>
+
+          <hr style="border:none; border-top:1px solid var(--line); margin:16px 0;">
+
+          <h2 style="margin:0 0 10px; font-size:18px;">Log a Payment</h2>
+
+          <label>Person</label>
+          <select id="payPerson"></select>
+
+          <div class="row">
+            <div>
+              <label>Payment Amount</label>
+              <input id="payAmount" type="number" step="0.01" min="0" placeholder="Amount" />
+            </div>
+            <div>
+              <label>Payment Date</label>
+              <input id="payDate" type="date" />
+            </div>
+          </div>
+
+          <label>Payment Note (optional)</label>
+          <input id="payNote" placeholder="Note" />
+
+          <button class="btn" id="payBtn">Apply Payment</button>
+
+          <hr style="border:none; border-top:1px solid var(--line); margin:16px 0;">
+
+          <div class="inline">
+            <button class="btn secondary" id="exportBtn">Export JSON</button>
+            <button class="btn secondary" id="importBtn">Import JSON</button>
+            <button class="btn danger" id="wipeBtn">Wipe All Data</button>
+          </div>
+          <p class="small" style="margin-top:10px;">
+            Export/Import is useful if you switch browsers/PCs. Data is stored in <span class="pill">localStorage</span> (only on this device/browser).
+          </p>
+          <input id="importFile" type="file" accept="application/json" style="display:none;" />
+        </div>
+
+        <!-- RIGHT: Table + stats -->
+        <div class="card">
+          <div class="inline" style="align-items:end;">
+            <div style="flex:2 1 260px;">
+              <label>Search</label>
+              <input id="search" placeholder="Search by name or note…" />
+            </div>
+            <div>
+              <label>Sort</label>
+              <select id="sort">
+                <option value="balanceDesc">Balance (high → low)</option>
+                <option value="balanceAsc">Balance (low → high)</option>
+                <option value="nameAsc">Name (A → Z)</option>
+                <option value="nameDesc">Name (Z → A)</option>
+                <option value="dueAsc">Due date (soonest)</option>
+                <option value="dueDesc">Due date (latest)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="stats" style="margin-top:12px;">
+            <div class="stat">
+              <div class="k">Total Owed To You</div>
+              <div class="v" id="totalOwed">$0.00</div>
+            </div>
+            <div class="stat">
+              <div class="k">People With Debts</div>
+              <div class="v" id="peopleCount">0</div>
+            </div>
+          </div>
+
+          <div style="margin-top:12px; overflow:auto;">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:18%;">Person</th>
+                  <th style="width:16%;">Balance</th>
+                  <th style="width:16%;">Due</th>
+                  <th>Notes</th>
+                  <th style="width:18%;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="tbody"></tbody>
+            </table>
+          </div>
+
+          <h2 style="margin:16px 0 10px; font-size:18px;">Recent Activity</h2>
+          <div class="log" id="log"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // -----------------------------
+    // "Security" note:
+    // This password gate is NOT secure. It's only UI protection.
+    // -----------------------------
+    const ADMIN_PASSWORD = "Jj8808520@";
+
+    // -----------------------------
+    // Simple IOU Tracker (localStorage)
+    // -----------------------------
+    const STORAGE_KEY = "iou_tracker_v1";
+
+    let state = loadState();
+
+    // Helpers
+    const el = (id) => document.getElementById(id);
+    function show(id){
+      ["homeView","adminLoginView","viewDebtsView","adminPanelView"].forEach(v => el(v).classList.add("hidden"));
+      el(id).classList.remove("hidden");
+    }
+    function money(n){
+      const v = Number(n || 0);
+      const abs = Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return (v < 0 ? "-$" : "$") + abs;
+    }
+    function normName(name){ return (name || "").trim(); }
+    function keyFor(name){ return normName(name).toLowerCase(); }
+    function round2(x){ return Math.round((Number(x) + Number.EPSILON) * 100) / 100; }
+    function escapeHtml(str){
+      return String(str)
+        .replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;").replaceAll("'","&#039;");
+    }
+
+    function loadState(){
+      try{
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if(!raw) return { people:{}, log:[] };
+        const parsed = JSON.parse(raw);
+        if(!parsed.people) parsed.people = {};
+        if(!parsed.log) parsed.log = [];
+        return parsed;
+      }catch(e){
+        return { people:{}, log:[] };
+      }
+    }
+    function saveState(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+    function pushLog(entry){
+      state.log.unshift(entry);
+      state.log = state.log.slice(0, 60);
+    }
+
+    // -----------------------------
+    // Navigation wiring
+    // -----------------------------
+    el("goViewBtn").addEventListener("click", () => { show("viewDebtsView"); renderView(); });
+    el("goAdminBtn").addEventListener("click", () => { show("adminLoginView"); el("adminPass").focus(); });
+
+    el("backFromLoginBtn").addEventListener("click", () => { el("adminPass").value=""; el("adminLoginMsg").textContent=""; show("homeView"); });
+    el("backFromViewBtn").addEventListener("click", () => { show("homeView"); });
+    el("backFromAdminBtn").addEventListener("click", () => { show("homeView"); });
+
+    el("adminLoginBtn").addEventListener("click", tryAdminLogin);
+    el("adminPass").addEventListener("keydown", (e) => { if(e.key === "Enter") tryAdminLogin(); });
+
+    function tryAdminLogin(){
+      const pass = el("adminPass").value;
+      if(pass === ADMIN_PASSWORD){
+        el("adminPass").value = "";
+        el("adminLoginMsg").textContent = "";
+        show("adminPanelView");
+        renderAdmin();      // ensure UI is up to date
+        renderView();       // keep view side consistent too
+      } else {
+        el("adminLoginMsg").textContent = "Wrong password.";
+      }
+    }
+
+    // -----------------------------
+    // ADMIN: wire your existing logic (same IDs, same features)
+    // -----------------------------
+    const person = el("person");
+    const amount = el("amount");
+    const due = el("due");
+    const note = el("note");
+    const addBtn = el("addBtn");
+    const clearFormBtn = el("clearFormBtn");
+
+    const payPerson = el("payPerson");
+    const payAmount = el("payAmount");
+    const payDate = el("payDate");
+    const payNote = el("payNote");
+    const payBtn = el("payBtn");
+
+    const search = el("search");
+    const sort = el("sort");
+    const tbody = el("tbody");
+    const totalOwed = el("totalOwed");
+    const peopleCount = el("peopleCount");
+    const logBox = el("log");
+
+    const exportBtn = el("exportBtn");
+    const importBtn = el("importBtn");
+    const importFile = el("importFile");
+    const wipeBtn = el("wipeBtn");
+
+    payDate.valueAsDate = new Date();
+
+    addBtn.addEventListener("click", () => upsertDebt(person.value, amount.value, due.value, note.value));
+    clearFormBtn.addEventListener("click", clearAddForm);
+    payBtn.addEventListener("click", () => applyPayment(payPerson.value, payAmount.value, payDate.value, payNote.value));
+    search.addEventListener("input", renderAdmin);
+    sort.addEventListener("change", renderAdmin);
+
+    tbody.addEventListener("click", (evt) => {
+      const btn = evt.target.closest("button");
+      if(!btn) return;
+      const act = btn.getAttribute("data-act");
+      const k = btn.getAttribute("data-k");
+      if(act === "edit") editPerson(k);
+      if(act === "delete") deletePerson(k);
+    });
+
+    exportBtn.addEventListener("click", () => {
+      const blob = new Blob([JSON.stringify(state, null, 2)], { type:"application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "debt-tracker-export.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    importBtn.addEventListener("click", () => importFile.click());
+    importFile.addEventListener("change", async () => {
+      const file = importFile.files?.[0];
+      if(!file) return;
+      try{
+        const txt = await file.text();
+        const incoming = JSON.parse(txt);
+        if(!incoming || typeof incoming !== "object") throw new Error("Bad file");
+        if(!incoming.people) incoming.people = {};
+        if(!incoming.log) incoming.log = [];
+        state = incoming;
+        saveState();
+        renderAdmin();
+        renderView();
+        alert("Imported!");
+      }catch(e){
+        alert("Import failed. Make sure it's a valid export JSON.");
+      }finally{
+        importFile.value = "";
+      }
+    });
+
+    wipeBtn.addEventListener("click", () => {
+      if(!confirm("Wipe ALL saved data? This cannot be undone.")) return;
+      state = { people:{}, log:[] };
+      saveState();
+      renderAdmin();
+      renderView();
+    });
+
+    function upsertDebt(name, addAmount, dueDate, noteText){
+      const n = normName(name);
+      if(!n) return alert("Enter a person's name.");
+      const a = Number(addAmount);
+      if(!(a > 0)) return alert("Amount must be greater than 0.");
+
+      const k = keyFor(n);
+      if(!state.people[k]){
+        state.people[k] = { name:n, balance:0, due:"", note:"", updatedAt: Date.now() };
+      }
+
+      state.people[k].balance = round2(state.people[k].balance + a);
+      if(dueDate) state.people[k].due = dueDate;
+      if(noteText) state.people[k].note = mergeNotes(state.people[k].note, noteText);
+      state.people[k].updatedAt = Date.now();
+
+      pushLog({ ts: Date.now(), type:"add", name:n, amount:a, note: noteText || "" });
+      saveState();
+      renderAdmin();
+      renderView();
+      clearAddForm();
+    }
+
+    function applyPayment(nameKey, payAmt, dateStr, noteText){
+      const k = nameKey;
+      if(!k || !state.people[k]) return alert("Pick a person.");
+      const a = Number(payAmt);
+      if(!(a > 0)) return alert("Payment must be greater than 0.");
+
+      const p = state.people[k];
+      p.balance = round2(p.balance - a);
+      if(p.balance < 0) p.balance = 0;
+      p.updatedAt = Date.now();
+
+      const dateNote = dateStr ? ` (${dateStr})` : "";
+      pushLog({ ts: Date.now(), type:"pay", name:p.name, amount:a, note: (noteText || "") + dateNote });
+
+      saveState();
+      renderAdmin();
+      renderView();
+      payAmount.value = "";
+      payNote.value = "";
+    }
+
+    function editPerson(k){
+      const p = state.people[k];
+      const newName = prompt("Edit name:", p.name);
+      if(newName === null) return;
+
+      const trimmed = normName(newName);
+      if(!trimmed) return alert("Name can't be blank.");
+
+      const newKey = keyFor(trimmed);
+      const newDue = prompt("Edit due date (YYYY-MM-DD) or blank:", p.due || "");
+      if(newDue === null) return;
+
+      const newNote = prompt("Edit note:", p.note || "");
+      if(newNote === null) return;
+
+      if(newKey !== k){
+        if(state.people[newKey]) return alert("That name already exists.");
+        delete state.people[k];
+        state.people[newKey] = { ...p, name: trimmed, due: (newDue||"").trim(), note: newNote, updatedAt: Date.now() };
+      }else{
+        p.name = trimmed;
+        p.due = (newDue||"").trim();
+        p.note = newNote;
+        p.updatedAt = Date.now();
+      }
+
+      pushLog({ ts: Date.now(), type:"edit", name: trimmed, amount: 0, note: "Edited person" });
+      saveState();
+      renderAdmin();
+      renderView();
+    }
+
+    function deletePerson(k){
+      const p = state.people[k];
+      if(!confirm(`Delete ${p.name}? This removes their balance and history entry.`)) return;
+      delete state.people[k];
+      pushLog({ ts: Date.now(), type:"delete", name: p.name, amount: 0, note: "Deleted person" });
+      saveState();
+      renderAdmin();
+      renderView();
+    }
+
+    function mergeNotes(oldNote, newNote){
+      const o = (oldNote || "").trim();
+      const n = (newNote || "").trim();
+      if(!o) return n;
+      if(!n) return o;
+      if(o.toLowerCase() === n.toLowerCase()) return o;
+      return o + " • " + n;
+    }
+
+    function clearAddForm(){
+      person.value = "";
+      amount.value = "";
+      due.value = "";
+      note.value = "";
+    }
+
+    function renderAdmin(){
+      renderPaySelect();
+      renderTable();
+      renderStats();
+      renderLog();
+    }
+
+    function renderPaySelect(){
+      const keys = Object.keys(state.people);
+      const entries = keys
+        .map(k => ({ k, ...state.people[k] }))
+        .filter(p => p.balance > 0)
+        .sort((a,b) => a.name.localeCompare(b.name));
+
+      payPerson.innerHTML = "";
+      const opt0 = document.createElement("option");
+      opt0.value = "";
+      opt0.textContent = entries.length ? "Select person…" : "No balances";
+      payPerson.appendChild(opt0);
+
+      for(const p of entries){
+        const opt = document.createElement("option");
+        opt.value = p.k;
+        opt.textContent = `${p.name} — ${money(p.balance)}`;
+        payPerson.appendChild(opt);
+      }
+    }
+
+    function getFilteredSortedPeople(){
+      const q = (search.value || "").trim().toLowerCase();
+
+      let arr = Object.keys(state.people).map(k => ({ k, ...state.people[k] }));
+      if(q){
+        arr = arr.filter(p =>
+          p.name.toLowerCase().includes(q) ||
+          (p.note || "").toLowerCase().includes(q)
+        );
+      }
+
+      const s = sort.value;
+      arr.sort((a,b) => {
+        if(s === "balanceDesc") return b.balance - a.balance;
+        if(s === "balanceAsc") return a.balance - b.balance;
+        if(s === "nameAsc") return a.name.localeCompare(b.name);
+        if(s === "nameDesc") return b.name.localeCompare(a.name);
+        if(s === "dueAsc") return (a.due || "9999-12-31").localeCompare(b.due || "9999-12-31");
+        if(s === "dueDesc") return (b.due || "0000-01-01").localeCompare(a.due || "0000-01-01");
+        return 0;
+      });
+
+      return arr;
+    }
+
+    function renderTable(){
+      const arr = getFilteredSortedPeople();
+
+      tbody.innerHTML = "";
+      if(arr.length === 0){
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td colspan="5" class="muted">No entries yet. Add someone on the left.</td>`;
+        tbody.appendChild(tr);
+        return;
+      }
+
+      for(const p of arr){
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><b>${escapeHtml(p.name)}</b><div class="small muted">${escapeHtml(p.k)}</div></td>
+          <td class="nowrap"><span class="pill">${money(p.balance)}</span></td>
+          <td class="nowrap">${p.due ? escapeHtml(p.due) : `<span class="muted">—</span>`}</td>
+          <td>${p.note ? escapeHtml(p.note) : `<span class="muted">—</span>`}</td>
+          <td>
+            <div class="actions">
+              <button class="btn secondary" data-act="edit" data-k="${escapeHtml(p.k)}">Edit</button>
+              <button class="btn danger" data-act="delete" data-k="${escapeHtml(p.k)}">Delete</button>
+            </div>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    function renderStats(){
+      const arr = Object.values(state.people);
+      const totalAmt = arr.reduce((sum,p)=> sum + (Number(p.balance)||0), 0);
+      const countAmt = arr.filter(p => (Number(p.balance)||0) > 0).length;
+      totalOwed.textContent = money(totalAmt);
+      peopleCount.textContent = String(countAmt);
+    }
+
+    function renderLog(){
+      logBox.innerHTML = "";
+      if(!state.log.length){
+        logBox.innerHTML = `<div class="muted small">No activity yet.</div>`;
+        return;
+      }
+      for(const e of state.log){
+        const when = new Date(e.ts).toLocaleString();
+        const label =
+          e.type === "add" ? "Added debt" :
+          e.type === "pay" ? "Payment" :
+          e.type === "edit" ? "Edited" :
+          e.type === "delete" ? "Deleted" : e.type;
+
+        const amt = e.amount ? ` • <b>${money(e.amount)}</b>` : "";
+        const noteTxt = e.note ? ` • <span class="muted">${escapeHtml(e.note)}</span>` : "";
+
+        const div = document.createElement("div");
+        div.className = "logitem";
+        div.innerHTML = `<b>${label}</b> — ${escapeHtml(e.name)}${amt}${noteTxt}<div class="small muted">${when}</div>`;
+        logBox.appendChild(div);
+      }
+    }
+
+    // -----------------------------
+    // VIEW MODE (read-only)
+    // -----------------------------
+    const viewSearch = el("viewSearch");
+    const viewSort = el("viewSort");
+    const viewTbody = el("viewTbody");
+    const viewTotal = el("viewTotal");
+    const viewCount = el("viewCount");
+
+    viewSearch.addEventListener("input", renderView);
+    viewSort.addEventListener("change", renderView);
+
+    function renderView(){
+      const q = (viewSearch.value || "").trim().toLowerCase();
+
+      let arr = Object.keys(state.people).map(k => ({ k, ...state.people[k] }));
+      // only show balances > 0
+      arr = arr.filter(p => Number(p.balance || 0) > 0);
+
+      if(q){
+        arr = arr.filter(p => p.name.toLowerCase().includes(q));
+      }
+
+      const s = viewSort.value;
+      arr.sort((a,b) => {
+        if(s === "balanceDesc") return b.balance - a.balance;
+        if(s === "balanceAsc") return a.balance - b.balance;
+        if(s === "nameAsc") return a.name.localeCompare(b.name);
+        if(s === "nameDesc") return b.name.localeCompare(a.name);
+        return 0;
+      });
+
+      const totalAmt = arr.reduce((sum,p)=> sum + (Number(p.balance)||0), 0);
+      viewTotal.textContent = money(totalAmt);
+      viewCount.textContent = String(arr.length);
+
+      viewTbody.innerHTML = "";
+      if(arr.length === 0){
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td colspan="2" class="muted">No balances to show.</td>`;
+        viewTbody.appendChild(tr);
+        return;
+      }
+
+      for(const p of arr){
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><b>${escapeHtml(p.name)}</b></td>
+          <td class="nowrap"><span class="pill">${money(p.balance)}</span></td>
+        `;
+        viewTbody.appendChild(tr);
+      }
+    }
+
+    // Initial view
+    show("homeView");
+  </script>
+</body>
+</html>
