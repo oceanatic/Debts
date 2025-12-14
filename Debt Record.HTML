@@ -232,7 +232,6 @@
       </div>
 
       <div class="banner">
-        Admin writes go to <b>Firebase</b>. If your rules are correct, only your admin account can write.
         <div class="small muted" id="adminFirebaseMsg" style="margin-top:6px;"></div>
       </div>
 
@@ -295,7 +294,7 @@
             <button class="btn danger" id="wipeBtn">Wipe All Data</button>
           </div>
           <p class="small" style="margin-top:10px;">
-            Export/Import is optional backup. Live data is in Firebase.
+            
           </p>
           <input id="importFile" type="file" accept="application/json" style="display:none;" />
         </div>
@@ -486,6 +485,8 @@
     const db = getFirestore(app);
     const auth = getAuth(app);
     const stateRef = doc(db, DOC_PATH.collection, DOC_PATH.doc);
+    console.log("DOC_PATH =", DOC_PATH);
+  console.log("Firestore doc path =", stateRef.path);
 
     // Live read for everyone
     function startListener(){
@@ -551,7 +552,6 @@
       const msg = el("adminFirebaseMsg");
       if(!msg) return;
       if(user){
-        msg.innerHTML = `Signed in to Firebase as <b>${escapeHtml(user.email || "user")}</b>`;
       } else {
         msg.textContent = "Not signed into Firebase.";
       }
