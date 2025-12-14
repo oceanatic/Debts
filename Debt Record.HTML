@@ -114,6 +114,18 @@
     }
     .portion .left{ flex:1 1 auto; }
     .portion .amt{ flex:0 0 auto; font-weight:800; }
+
+    .banner{
+      border:1px solid var(--line);
+      background:#0f1724;
+      border-radius:14px;
+      padding:10px 12px;
+      margin-bottom:12px;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.35;
+    }
+    .banner b{ color:var(--text); }
   </style>
 </head>
 <body>
@@ -157,6 +169,11 @@
         <div style="flex:1 1 160px;">
           <button class="btn secondary" id="backFromViewBtn" style="margin-top:0;">Back</button>
         </div>
+      </div>
+
+      <div class="banner">
+        This page reads shared data from <b>Firebase</b>. Updates appear for everyone automatically.
+        <span id="connStatus" class="pill" style="margin-left:8px;">Connecting…</span>
       </div>
 
       <div class="card">
@@ -212,6 +229,11 @@
         <div style="flex:1 1 160px;">
           <button class="btn secondary" id="backFromAdminBtn" style="margin-top:0;">Back</button>
         </div>
+      </div>
+
+      <div class="banner">
+        Admin writes go to <b>Firebase</b>. If your rules are correct, only your admin account can write.
+        <div class="small muted" id="adminFirebaseMsg" style="margin-top:6px;"></div>
       </div>
 
       <div class="grid">
@@ -273,7 +295,7 @@
             <button class="btn danger" id="wipeBtn">Wipe All Data</button>
           </div>
           <p class="small" style="margin-top:10px;">
-            Export/Import is useful if you switch browsers/PCs. Data is stored in <span class="pill">localStorage</span> (only on this device/browser).
+            Export/Import is optional backup. Live data is in Firebase.
           </p>
           <input id="importFile" type="file" accept="application/json" style="display:none;" />
         </div>
@@ -332,16 +354,54 @@
 
   </div>
 
-  <script>
-    // -----------------------------
-    // NOTE: Front-end password gate is not real security.
-    // -----------------------------
+  <!-- Firebase (ES Modules) -->
+  <script type="module">
+    // =============================
+    // KEEP THIS PASSWORD EXACTLY
+    // =============================
     const ADMIN_PASSWORD = "Jj8808520@";
-    const STORAGE_KEY = "iou_tracker_v2_portions";
 
-    let state = loadState();
-    migrateIfNeeded();
+    // =============================
+    // YOU MUST FILL THESE IN
+    // =============================
+    const FIREBASE_CONFIG = {
+      apiKey: "PASTE_API_KEY",
+      authDomain: "PASTE_AUTH_DOMAIN",
+      projectId: "PASTE_PROJECT_ID",
+      storageBucket: "PASTE_STORAGE_BUCKET",
+      messagingSenderId: "PASTE_SENDER_ID",
+      appId: "PASTE_APP_ID"
+    };
 
+    // Your Firebase Auth admin credentials (email/password provider)
+    // This is NOT your UI password above — this is your Firebase account login.
+    const ADMIN_EMAIL = "PASTE_ADMIN_EMAIL";
+    const ADMIN_FIREBASE_PASSWORD = "PASTE_ADMIN_FIREBASE_PASSWORD";
+
+    // Where data lives in Firestore:
+    // collection: state, doc: main
+    const DOC_PATH = { collection: "state", doc: "main" };
+
+    // =============================
+    // Firebase Imports
+    // =============================
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+    import {
+      getFirestore, doc, onSnapshot, setDoc, getDoc
+    } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+    import {
+      getAuth, signInWithEmailAndPassword, onAuthStateChanged
+    } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+
+    // =============================
+    // App State (v2 portions)
+    // =============================
+    let state = { people:{}, log:[] };
+    let unsub = null;
+    let isAdminSession = false;
+    let writeLock = false;
+
+    // Helpers
     const el = (id) => document.getElementById(id);
 
     function show(id){
@@ -349,7 +409,7 @@
       el(id).classList.remove("hidden");
     }
 
-    // NO CENTS: always whole dollars, no .00 ever
+    // NO CENTS
     function money(n){
       const v = Math.round(Number(n || 0));
       const abs = Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -363,53 +423,41 @@
         .replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")
         .replaceAll('"',"&quot;").replaceAll("'","&#039;");
     }
-
     function uuid(){
       return (crypto?.randomUUID ? crypto.randomUUID() : ("p_" + Date.now() + "_" + Math.random().toString(16).slice(2)));
     }
-
     function totalBalance(person){
       const portions = Array.isArray(person.portions) ? person.portions : [];
       return portions.reduce((s,pt)=> s + Math.round(Number(pt.amount)||0), 0);
     }
-
-    function loadState(){
-      try{
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if(raw){
-          const parsed = JSON.parse(raw);
-          if(!parsed.people) parsed.people = {};
-          if(!parsed.log) parsed.log = [];
-          return parsed;
-        }
-
-        const oldRaw = localStorage.getItem("iou_tracker_v1");
-        if(oldRaw){
-          const old = JSON.parse(oldRaw);
-          return { people: old.people || {}, log: old.log || [], _needsMigration: true };
-        }
-
-        return { people:{}, log:[] };
-      }catch(e){
-        return { people:{}, log:[] };
-      }
-    }
-
-    function saveState(){
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    }
-
     function pushLog(entry){
+      state.log = Array.isArray(state.log) ? state.log : [];
       state.log.unshift(entry);
       state.log = state.log.slice(0, 60);
     }
+    function migrateShapeToV2(incoming){
+      const s = incoming && typeof incoming === "object" ? incoming : { people:{}, log:[] };
+      if(!s.people) s.people = {};
+      if(!s.log) s.log = [];
 
-    function migrateIfNeeded(){
-      if(!state._needsMigration) return;
+      const anyKey = Object.keys(s.people)[0];
+      if(anyKey && s.people[anyKey] && Array.isArray(s.people[anyKey].portions)) {
+        for(const k of Object.keys(s.people)){
+          const p = s.people[k];
+          p.portions = (p.portions || []).map(pt => ({
+            id: pt.id || uuid(),
+            amount: Math.round(Number(pt.amount||0)),
+            note: (pt.note || "").trim(),
+            createdAt: pt.createdAt || Date.now()
+          }));
+        }
+        return s;
+      }
 
+      // v1 -> v2
       const newPeople = {};
-      for(const k of Object.keys(state.people || {})){
-        const p = state.people[k];
+      for(const k of Object.keys(s.people || {})){
+        const p = s.people[k];
         const bal = Math.round(Number(p.balance || 0));
         const n = p.name || k;
         const due = p.due || "";
@@ -417,27 +465,101 @@
 
         const portions = [];
         if(bal > 0 || note){
-          portions.push({
-            id: uuid(),
-            amount: bal,
-            note: note || "",
-            createdAt: Date.now()
-          });
+          portions.push({ id: uuid(), amount: bal, note: (note||"").trim(), createdAt: Date.now() });
         }
-
-        newPeople[k] = {
-          name: n,
-          due: due,
-          portions: portions,
-          updatedAt: p.updatedAt || Date.now()
-        };
+        newPeople[k] = { name:n, due: due, portions: portions, updatedAt: p.updatedAt || Date.now() };
       }
-      state.people = newPeople;
-      delete state._needsMigration;
-      saveState();
+      s.people = newPeople;
+      delete s._needsMigration;
+      return s;
     }
 
+    function setConn(text){
+      const c = el("connStatus");
+      if(c) c.textContent = text;
+    }
+
+    // =============================
+    // Firebase Init
+    // =============================
+    const app = initializeApp(FIREBASE_CONFIG);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+    const stateRef = doc(db, DOC_PATH.collection, DOC_PATH.doc);
+
+    // Live read for everyone
+    function startListener(){
+      if(unsub) unsub();
+
+      setConn("Connecting…");
+      unsub = onSnapshot(stateRef, (snap) => {
+        if(snap.exists()){
+          const data = migrateShapeToV2(snap.data());
+          // Avoid clobbering UI mid-write in same tab
+          if(!writeLock){
+            state = data;
+            renderAdmin();
+            renderView();
+          }
+          setConn("Live");
+        } else {
+          // If doc doesn't exist yet, treat as empty
+          state = { people:{}, log:[] };
+          renderAdmin();
+          renderView();
+          setConn("Empty");
+        }
+      }, (err) => {
+        console.error(err);
+        setConn("Offline");
+      });
+    }
+
+    async function ensureDocExists(){
+      const snap = await getDoc(stateRef);
+      if(!snap.exists()){
+        await setDoc(stateRef, { people:{}, log:[], updatedAt: Date.now() }, { merge: false });
+      }
+    }
+
+    // Writes only from admin session
+    async function saveRemote(){
+      if(!isAdminSession){
+        alert("Not admin session. You can't write.");
+        return;
+      }
+      // Prevent rapid double-writes
+      if(writeLock) return;
+      writeLock = true;
+      try{
+        const out = {
+          people: state.people || {},
+          log: state.log || [],
+          updatedAt: Date.now()
+        };
+        await setDoc(stateRef, out, { merge: false });
+      } catch(e){
+        console.error(e);
+        alert("Firebase write failed (rules/auth). Check console + Firestore rules.");
+      } finally{
+        writeLock = false;
+      }
+    }
+
+    // Track auth state (optional display/debug)
+    onAuthStateChanged(auth, (user) => {
+      const msg = el("adminFirebaseMsg");
+      if(!msg) return;
+      if(user){
+        msg.innerHTML = `Signed in to Firebase as <b>${escapeHtml(user.email || "user")}</b>`;
+      } else {
+        msg.textContent = "Not signed into Firebase.";
+      }
+    });
+
+    // =============================
     // Navigation wiring
+    // =============================
     el("goViewBtn").addEventListener("click", () => { show("viewDebtsView"); renderView(); });
     el("goAdminBtn").addEventListener("click", () => { show("adminLoginView"); el("adminPass").focus(); });
 
@@ -448,20 +570,39 @@
     el("adminLoginBtn").addEventListener("click", tryAdminLogin);
     el("adminPass").addEventListener("keydown", (e) => { if(e.key === "Enter") tryAdminLogin(); });
 
-    function tryAdminLogin(){
+    async function tryAdminLogin(){
       const pass = el("adminPass").value;
-      if(pass === ADMIN_PASSWORD){
+      if(pass !== ADMIN_PASSWORD){
+        el("adminLoginMsg").textContent = "Wrong password.";
+        return;
+      }
+
+      // UI password ok — now sign into Firebase (real security is Firestore rules)
+      try{
+        el("adminLoginMsg").textContent = "Signing into Firebase…";
+
+        if(ADMIN_EMAIL.startsWith("PASTE_") || ADMIN_FIREBASE_PASSWORD.startsWith("PASTE_")){
+          el("adminLoginMsg").textContent = "You didn't set ADMIN_EMAIL / ADMIN_FIREBASE_PASSWORD in the code yet.";
+          return;
+        }
+
+        await signInWithEmailAndPassword(auth, ADMIN_EMAIL, ADMIN_FIREBASE_PASSWORD);
+        isAdminSession = true;
+
         el("adminPass").value = "";
         el("adminLoginMsg").textContent = "";
         show("adminPanelView");
         renderAdmin();
         renderView();
-      } else {
-        el("adminLoginMsg").textContent = "Wrong password.";
+      } catch(e){
+        console.error(e);
+        el("adminLoginMsg").textContent = "Firebase login failed. (Wrong email/pass OR auth not enabled.)";
       }
     }
 
+    // =============================
     // ADMIN elements
+    // =============================
     const person = el("person");
     const amount = el("amount");
     const due = el("due");
@@ -490,33 +631,38 @@
 
     payDate.valueAsDate = new Date();
 
-    addBtn.addEventListener("click", () => addPortion(person.value, amount.value, due.value, note.value));
+    addBtn.addEventListener("click", async () => {
+      addPortion(person.value, amount.value, due.value, note.value);
+      await saveRemote();
+    });
+
     clearFormBtn.addEventListener("click", clearAddForm);
 
-    payBtn.addEventListener("click", () => applyPaymentSpecific(payPerson.value, payPortion.value, payAmount.value, payDate.value, payNote.value));
-
-    payPerson.addEventListener("change", () => {
-      populatePortionsForPayment(payPerson.value);
+    payBtn.addEventListener("click", async () => {
+      applyPaymentSpecific(payPerson.value, payPortion.value, payAmount.value, payDate.value, payNote.value);
+      await saveRemote();
     });
+
+    payPerson.addEventListener("change", () => populatePortionsForPayment(payPerson.value));
 
     search.addEventListener("input", renderAdmin);
     sort.addEventListener("change", renderAdmin);
 
-    tbody.addEventListener("click", (evt) => {
+    tbody.addEventListener("click", async (evt) => {
       const btn = evt.target.closest("button");
       if(!btn) return;
       const act = btn.getAttribute("data-act");
       const k = btn.getAttribute("data-k");
-      if(act === "edit") editPerson(k);
-      if(act === "delete") deletePerson(k);
+      if(act === "edit"){ editPerson(k); await saveRemote(); }
+      if(act === "delete"){ deletePerson(k); await saveRemote(); }
     });
 
     exportBtn.addEventListener("click", () => {
-      const blob = new Blob([JSON.stringify(state, null, 2)], { type:"application/json" });
+      const blob = new Blob([JSON.stringify({ people: state.people||{}, log: state.log||[] }, null, 2)], { type:"application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "debt-tracker-export.json";
+      a.download = "debts-export.json";
       a.click();
       URL.revokeObjectURL(url);
     });
@@ -527,34 +673,32 @@
       if(!file) return;
       try{
         const txt = await file.text();
-        const incoming = JSON.parse(txt);
-        if(!incoming || typeof incoming !== "object") throw new Error("Bad file");
-        if(!incoming.people) incoming.people = {};
-        if(!incoming.log) incoming.log = [];
+        const incoming = migrateShapeToV2(JSON.parse(txt));
         state = incoming;
-        migrateIfNeeded();
-        saveState();
         renderAdmin();
         renderView();
-        alert("Imported!");
+        if(confirm("Imported into this session. Push to Firebase now?")){
+          await saveRemote();
+        }
       }catch(e){
-        alert("Import failed. Make sure it's a valid export JSON.");
+        alert("Import failed. Make sure it's valid JSON.");
       }finally{
         importFile.value = "";
       }
     });
 
-    wipeBtn.addEventListener("click", () => {
-      if(!confirm("Wipe ALL saved data? This cannot be undone.")) return;
+    wipeBtn.addEventListener("click", async () => {
+      if(!confirm("Wipe ALL Firebase data? This affects everyone.")) return;
       state = { people:{}, log:[] };
-      saveState();
       renderAdmin();
       renderView();
+      await saveRemote();
     });
 
     function ensurePersonRecord(name, dueDate){
       const n = normName(name);
       const k = keyFor(n);
+      if(!state.people) state.people = {};
       if(!state.people[k]){
         state.people[k] = { name:n, due:"", portions:[], updatedAt: Date.now() };
       }
@@ -580,7 +724,7 @@
       });
 
       pushLog({ ts: Date.now(), type:"add", name:n, amount:a, note: (noteText || "") });
-      saveState();
+
       renderAdmin();
       renderView();
       clearAddForm();
@@ -588,7 +732,7 @@
 
     function applyPaymentSpecific(personKey, portionId, amt, dateStr, noteText){
       const k = personKey;
-      if(!k || !state.people[k]) return alert("Pick a person.");
+      if(!k || !state.people || !state.people[k]) return alert("Pick a person.");
       const a = Math.round(Number(amt));
       if(!(a > 0)) return alert("Payment must be greater than 0.");
       if(!portionId) return alert("Pick a portion.");
@@ -599,7 +743,6 @@
 
       pt.amount = Math.round(Number(pt.amount || 0) - a);
       if(pt.amount < 0) pt.amount = 0;
-
       p.updatedAt = Date.now();
 
       const dateNote = dateStr ? ` (${dateStr})` : "";
@@ -612,10 +755,8 @@
         note: (noteText || "") + portionLabel + dateNote
       });
 
-      // remove zero-amount portions to reduce clutter
       p.portions = (p.portions || []).filter(x => Number(x.amount || 0) > 0);
 
-      saveState();
       renderAdmin();
       renderView();
 
@@ -647,17 +788,15 @@
       }
 
       pushLog({ ts: Date.now(), type:"edit", name: trimmed, amount: 0, note: "Edited person" });
-      saveState();
       renderAdmin();
       renderView();
     }
 
     function deletePerson(k){
       const p = state.people[k];
-      if(!confirm(`Delete ${p.name}? This removes their debt portions and history entry.`)) return;
+      if(!confirm(`Delete ${p.name}? This removes their debt portions.`)) return;
       delete state.people[k];
       pushLog({ ts: Date.now(), type:"delete", name: p.name, amount: 0, note: "Deleted person" });
-      saveState();
       renderAdmin();
       renderView();
     }
@@ -678,7 +817,7 @@
     }
 
     function renderPaySelect(){
-      const keys = Object.keys(state.people);
+      const keys = Object.keys(state.people || {});
       const entries = keys
         .map(k => ({ k, ...state.people[k], balance: totalBalance(state.people[k]) }))
         .filter(p => p.balance > 0)
@@ -701,7 +840,7 @@
     function populatePortionsForPayment(personKey){
       payPortion.innerHTML = "";
       const k = personKey;
-      if(!k || !state.people[k]){
+      if(!k || !state.people || !state.people[k]){
         const opt = document.createElement("option");
         opt.value = "";
         opt.textContent = "Select person first…";
@@ -732,7 +871,7 @@
     function getFilteredSortedPeopleAdmin(){
       const q = (search.value || "").trim().toLowerCase();
 
-      let arr = Object.keys(state.people).map(k => {
+      let arr = Object.keys(state.people || {}).map(k => {
         const p = state.people[k];
         const portionsText = (p.portions || []).map(pt => pt.note || "").join(" ").toLowerCase();
         return { k, ...p, balance: totalBalance(p), _portionsText: portionsText };
@@ -794,16 +933,16 @@
     }
 
     function renderAdminStats(){
-      const arr = Object.values(state.people);
+      const arr = Object.values(state.people || {});
       const totalAmt = arr.reduce((sum,p)=> sum + totalBalance(p), 0);
       const countAmt = arr.filter(p => totalBalance(p) > 0).length;
-      totalOwed.textContent = money(totalAmt);
-      peopleCount.textContent = String(countAmt);
+      el("totalOwed").textContent = money(totalAmt);
+      el("peopleCount").textContent = String(countAmt);
     }
 
     function renderLog(){
       logBox.innerHTML = "";
-      if(!state.log.length){
+      if(!state.log || !state.log.length){
         logBox.innerHTML = `<div class="muted small">No activity yet.</div>`;
         return;
       }
@@ -849,7 +988,7 @@
         return;
       }
 
-      const p = state.people[k];
+      const p = (state.people || {})[k];
       if(!p) return;
 
       const portions = (p.portions || []).filter(pt => Number(pt.amount||0) > 0);
@@ -879,7 +1018,7 @@
     function renderView(){
       const q = (viewSearch.value || "").trim().toLowerCase();
 
-      let arr = Object.keys(state.people).map(k => {
+      let arr = Object.keys(state.people || {}).map(k => {
         const p = state.people[k];
         return { k, ...p, balance: totalBalance(p) };
       });
@@ -924,7 +1063,20 @@
       }
     }
 
-    show("homeView");
+    // Boot
+    (async () => {
+      try{
+        await ensureDocExists();
+      } catch(e){
+        console.error(e);
+        // If rules require auth for creation, this might fail on first load.
+        // In that case, create the doc once from admin account in Firebase console or after admin login.
+      }
+      startListener();
+      show("homeView");
+      renderAdmin();
+      renderView();
+    })();
   </script>
 </body>
 </html>
