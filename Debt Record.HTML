@@ -433,17 +433,25 @@
     }
 
     async function postDiscord(content){
-      if(!DISCORD_WEBHOOK_URL) return;
+      if(!DISCORD_WEBHOOK_URL || DISCORD_WEBHOOK_URL.startsWith("PASTE_")) return;
+    
       try{
+        // Discord webhooks accept multipart with payload_json
+        const fd = new FormData();
+        fd.append("payload_json", JSON.stringify({ content }));
+    
+        // no-cors: request is sent; response is opaque (you can't read it)
         await fetch(DISCORD_WEBHOOK_URL, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content })
+          mode: "no-cors",
+          body: fd
         });
-      }catch(e){
+    
+      } catch(e){
         console.error("Discord webhook failed:", e);
       }
     }
+
 
     function mentionForPerson(personRecord, fallbackName){
       const id = personRecord && personRecord.discordUserId;
@@ -1188,3 +1196,4 @@
   </script>
 </body>
 </html>
+
