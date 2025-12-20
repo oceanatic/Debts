@@ -261,13 +261,14 @@
 
           <hr style="border:none; border-top:1px solid var(--line); margin:16px 0;">
 
-          <h2 style="margin:0 0 10px; font-size:18px;">Log a Payment (Specific Portion)</h2>
+          <h2 style="margin:0 0 10px; font-size:18px;">Log a Payment (Multiple Portions)</h2>
 
           <label>Person</label>
           <select id="payPerson"></select>
 
-          <label>Debt Portion</label>
-          <select id="payPortion"></select>
+          <label>Debt Portion (hold Ctrl / Cmd to select multiple)</label>
+          <select id="payPortion" multiple size="6"></select>
+          <div class="small muted">Tip: Ctrl (Windows) / Cmd (Mac) + click to pick multiple portions.</div>
 
           <div class="row">
             <div>
@@ -363,7 +364,7 @@
     const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1451822540686102639/9poM5O-vV2p7YwVKJr4Njj_ZS9a1jnqosMCgJbF4jWc-0DqO4DmrqgERTpA13LibQxNP";
 
     // =============================
-    // YOU MUST FILL THESE IN
+    // FIREBASE CONFIG
     // =============================
     const FIREBASE_CONFIG = {
       apiKey: "AIzaSyCrWTZUeuLgU-i4h7eDpkdiKI8UqsfR6o0",
@@ -374,28 +375,22 @@
       appId: "1:922613772542:web:02d7dfbc2216dad2ea75af"
     };
 
-    // Your Firebase Auth admin credentials (email/password provider)
-    // This is NOT your UI password above — this is your Firebase account login.
+    // Firebase Auth admin credentials (email/password provider)
     const ADMIN_EMAIL = "jasonyou8808@gmail.com";
     const ADMIN_FIREBASE_PASSWORD = "Jj8808520@";
 
     // Where data lives in Firestore:
-    // collection: state, doc: main
     const DOC_PATH = { collection: "state", doc: "main" };
 
     // =============================
     // Firebase Imports
     // =============================
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-    import {
-      getFirestore, doc, onSnapshot, setDoc, getDoc
-    } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-    import {
-      getAuth, signInWithEmailAndPassword, onAuthStateChanged
-    } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+    import { getFirestore, doc, onSnapshot, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+    import { getAuth, signInWithEmailAndPassword, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 
     // =============================
-    // App State (v2 portions)
+    // App State
     // =============================
     let state = { people:{}, log:[] };
     let unsub = null;
@@ -432,26 +427,27 @@
       return portions.reduce((s,pt)=> s + Math.round(Number(pt.amount)||0), 0);
     }
 
+    // Multi-select helper
+    function getSelectedValues(selectEl){
+      return Array.from(selectEl.selectedOptions || []).map(o => o.value).filter(Boolean);
+    }
+
     async function postDiscord(content){
-      if(!DISCORD_WEBHOOK_URL || DISCORD_WEBHOOK_URL.startsWith("PASTE_")) return;
-    
+      if(!DISCORD_WEBHOOK_URL || DISCORD_WEBHOOK_URL.startsWith("REPLACE_")) return;
+
       try{
-        // Discord webhooks accept multipart with payload_json
         const fd = new FormData();
         fd.append("payload_json", JSON.stringify({ content }));
-    
-        // no-cors: request is sent; response is opaque (you can't read it)
+
         await fetch(DISCORD_WEBHOOK_URL, {
           method: "POST",
           mode: "no-cors",
           body: fd
         });
-    
       } catch(e){
         console.error("Discord webhook failed:", e);
       }
     }
-
 
     function mentionForPerson(personRecord, fallbackName){
       const id = personRecord && personRecord.discordUserId;
@@ -467,7 +463,7 @@
       if(newBal > oldBal){
         const delta = newBal - oldBal;
         if(oldBal > 0){
-          await postDiscord(`${who} Another ${money(delta)} huh? Don't get too carried away now. Your debt is now ${money(newBal)}.`);
+          await postDiscord(`${who} Another ${money(delta)} huh? Don't get too carried away now.`);
         } else {
           await postDiscord(`${who} Welcome back, loyal patron! Your debt is now ${money(newBal)}!`);
         }
@@ -477,35 +473,11 @@
       // Payment (decrease)
       if(newBal < oldBal){
         const paid = oldBal - newBal;
-
         if(newBal === 0){
-          // Fully paid off
           await postDiscord(`${who} You have paid ${money(oldBal)} out of ${money(oldBal)}. You're a free man for now.`);
         } else {
-          // Partial payment
           await postDiscord(`${who} You have paid ${money(paid)} out of ${money(oldBal)}. Just another ${money(newBal)} to go.`);
         }
-      }
-    }
-
-    async function notifyDiffs(oldPeople, newPeople){
-      const keys = new Set([
-        ...Object.keys(oldPeople || {}),
-        ...Object.keys(newPeople || {})
-      ]);
-
-      for(const k of keys){
-        const oldRec = (oldPeople || {})[k];
-        const newRec = (newPeople || {})[k];
-
-        // If record disappeared (e.g., import removed it), skip to avoid weird spam.
-        if(!newRec) continue;
-
-        const oldBal = oldRec ? totalBalance(oldRec) : 0;
-        const newBal = newRec ? totalBalance(newRec) : 0;
-
-        if(oldBal === newBal) continue;
-        await notifyBalanceChange(k, oldBal, newBal, newRec);
       }
     }
 
@@ -514,6 +486,7 @@
       state.log.unshift(entry);
       state.log = state.log.slice(0, 60);
     }
+
     function migrateShapeToV2(incoming){
       const s = incoming && typeof incoming === "object" ? incoming : { people:{}, log:[] };
       if(!s.people) s.people = {};
@@ -565,8 +538,6 @@
     const db = getFirestore(app);
     const auth = getAuth(app);
     const stateRef = doc(db, DOC_PATH.collection, DOC_PATH.doc);
-    console.log("DOC_PATH =", DOC_PATH);
-    console.log("Firestore doc path =", stateRef.path);
 
     // Live read for everyone
     function startListener(){
@@ -576,7 +547,6 @@
       unsub = onSnapshot(stateRef, (snap) => {
         if(snap.exists()){
           const data = migrateShapeToV2(snap.data());
-          // Avoid clobbering UI mid-write in same tab
           if(!writeLock){
             state = data;
             renderAdmin();
@@ -584,7 +554,6 @@
           }
           setConn("Live");
         } else {
-          // If doc doesn't exist yet, treat as empty
           state = { people:{}, log:[] };
           renderAdmin();
           renderView();
@@ -609,7 +578,6 @@
         alert("Not admin session. You can't write.");
         return;
       }
-      // Prevent rapid double-writes
       if(writeLock) return;
       writeLock = true;
       try{
@@ -627,14 +595,10 @@
       }
     }
 
-    // Track auth state (optional display/debug)
     onAuthStateChanged(auth, (user) => {
       const msg = el("adminFirebaseMsg");
       if(!msg) return;
-      if(user){
-      } else {
-        msg.textContent = "Not signed into Firebase.";
-      }
+      if(!user) msg.textContent = "Not signed into Firebase.";
     });
 
     // =============================
@@ -657,12 +621,11 @@
         return;
       }
 
-      // UI password ok — now sign into Firebase (real security is Firestore rules)
       try{
         el("adminLoginMsg").textContent = "Signing into Firebase…";
 
-        if(ADMIN_EMAIL.startsWith("PASTE_") || ADMIN_FIREBASE_PASSWORD.startsWith("PASTE_")){
-          el("adminLoginMsg").textContent = "You didn't set ADMIN_EMAIL / ADMIN_FIREBASE_PASSWORD in the code yet.";
+        if(ADMIN_EMAIL.startsWith("REPLACE_") || ADMIN_FIREBASE_PASSWORD.startsWith("REPLACE_")){
+          el("adminLoginMsg").textContent = "Set ADMIN_EMAIL / ADMIN_FIREBASE_PASSWORD in the code.";
           return;
         }
 
@@ -700,8 +663,6 @@
     const search = el("search");
     const sort = el("sort");
     const tbody = el("tbody");
-    const totalOwed = el("totalOwed");
-    const peopleCount = el("peopleCount");
     const logBox = el("log");
 
     const exportBtn = el("exportBtn");
@@ -712,7 +673,6 @@
     payDate.valueAsDate = new Date();
 
     addBtn.addEventListener("click", async () => {
-      // Snapshot old balance before mutation
       const n = normName(person.value);
       const k = keyFor(n);
       const oldBal = (k && state.people && state.people[k]) ? totalBalance(state.people[k]) : 0;
@@ -723,7 +683,6 @@
 
       await saveRemote();
 
-      // Notify based on change
       if(k && newBal !== oldBal){
         await notifyBalanceChange(k, oldBal, newBal, state.people[k]);
       }
@@ -737,7 +696,9 @@
 
       const oldBal = totalBalance(state.people[k]);
 
-      applyPaymentSpecific(payPerson.value, payPortion.value, payAmount.value, payDate.value, payNote.value);
+      const portionIds = getSelectedValues(payPortion);
+
+      applyPaymentMultiple(payPerson.value, portionIds, payAmount.value, payDate.value, payNote.value);
 
       const newBal = (state.people && state.people[k]) ? totalBalance(state.people[k]) : 0;
 
@@ -749,7 +710,6 @@
     });
 
     payPerson.addEventListener("change", () => populatePortionsForPayment(payPerson.value));
-
     search.addEventListener("input", renderAdmin);
     sort.addEventListener("change", renderAdmin);
 
@@ -776,23 +736,14 @@
     importFile.addEventListener("change", async () => {
       const file = importFile.files?.[0];
       if(!file) return;
-
-      // Snapshot state BEFORE import so we can diff if user pushes
-      const beforePeople = JSON.parse(JSON.stringify(state.people || {}));
-
       try{
         const txt = await file.text();
         const incoming = migrateShapeToV2(JSON.parse(txt));
         state = incoming;
         renderAdmin();
         renderView();
-
         if(confirm("Imported into this session. Push to Firebase now?")){
           await saveRemote();
-
-          // Diff notifications (multiple messages)
-          const afterPeople = state.people || {};
-          await notifyDiffs(beforePeople, afterPeople);
         }
       }catch(e){
         alert("Import failed. Make sure it's valid JSON.");
@@ -807,7 +758,6 @@
       renderAdmin();
       renderView();
       await saveRemote();
-
       await postDiscord("The monarchy has been overthrown, everybody is now debt-free!");
     });
 
@@ -846,32 +796,57 @@
       clearAddForm();
     }
 
-    function applyPaymentSpecific(personKey, portionId, amt, dateStr, noteText){
+    // NEW: multi-portion payment application
+    function applyPaymentMultiple(personKey, portionIds, amt, dateStr, noteText){
       const k = personKey;
       if(!k || !state.people || !state.people[k]) return alert("Pick a person.");
-      const a = Math.round(Number(amt));
-      if(!(a > 0)) return alert("Payment must be greater than 0.");
-      if(!portionId) return alert("Pick a portion.");
+
+      const a0 = Math.round(Number(amt));
+      if(!(a0 > 0)) return alert("Payment must be greater than 0.");
+      if(!Array.isArray(portionIds) || portionIds.length === 0) return alert("Select one or more portions.");
 
       const p = state.people[k];
-      const pt = (p.portions || []).find(x => x.id === portionId);
-      if(!pt) return alert("That portion no longer exists.");
+      const live = (p.portions || []).filter(x => Number(x.amount || 0) > 0);
 
-      pt.amount = Math.round(Number(pt.amount || 0) - a);
-      if(pt.amount < 0) pt.amount = 0;
+      const selectedSet = new Set(portionIds);
+      const targets = live.filter(pt => selectedSet.has(pt.id));
+
+      if(!targets.length) return alert("Those portions no longer exist.");
+
+      let remainingPay = a0;
+      let actuallyPaid = 0;
+
+      for(const pt of targets){
+        if(remainingPay <= 0) break;
+
+        const cur = Math.round(Number(pt.amount || 0));
+        if(cur <= 0) continue;
+
+        const payHere = Math.min(cur, remainingPay);
+        pt.amount = cur - payHere;
+
+        remainingPay -= payHere;
+        actuallyPaid += payHere;
+      }
+
+      // Remove fully paid portions
+      p.portions = (p.portions || []).filter(x => Number(x.amount || 0) > 0);
       p.updatedAt = Date.now();
 
+      // One consolidated log entry
       const dateNote = dateStr ? ` (${dateStr})` : "";
-      const portionLabel = pt.note ? ` [${pt.note}]` : " [portion]";
+      const portionLabel = targets.length === 1 ? " [portion]" : ` [${targets.length} portions]`;
       pushLog({
         ts: Date.now(),
         type:"pay",
         name: p.name,
-        amount: a,
+        amount: actuallyPaid,
         note: (noteText || "") + portionLabel + dateNote
       });
 
-      p.portions = (p.portions || []).filter(x => Number(x.amount || 0) > 0);
+      if(remainingPay > 0){
+        alert(`Payment exceeded selected portions by ${money(remainingPay)}. Extra was not applied.`);
+      }
 
       renderAdmin();
       renderView();
@@ -960,6 +935,8 @@
         const opt = document.createElement("option");
         opt.value = "";
         opt.textContent = "Select person first…";
+        opt.disabled = true;
+        opt.selected = true;
         payPortion.appendChild(opt);
         return;
       }
@@ -971,6 +948,8 @@
         const opt = document.createElement("option");
         opt.value = "";
         opt.textContent = "No portions with balance";
+        opt.disabled = true;
+        opt.selected = true;
         payPortion.appendChild(opt);
         return;
       }
@@ -1185,8 +1164,6 @@
         await ensureDocExists();
       } catch(e){
         console.error(e);
-        // If rules require auth for creation, this might fail on first load.
-        // In that case, create the doc once from admin account in Firebase console or after admin login.
       }
       startListener();
       show("homeView");
@@ -1196,4 +1173,3 @@
   </script>
 </body>
 </html>
-
