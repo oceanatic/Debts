@@ -292,9 +292,7 @@
             <button class="btn secondary" id="importBtn">Import JSON</button>
             <button class="btn danger" id="wipeBtn">Wipe All Data</button>
           </div>
-          <p class="small" style="margin-top:10px;">
-            
-          </p>
+          <p class="small" style="margin-top:10px;"></p>
           <input id="importFile" type="file" accept="application/json" style="display:none;" />
         </div>
 
@@ -358,6 +356,11 @@
     // KEEP THIS PASSWORD EXACTLY
     // =============================
     const ADMIN_PASSWORD = "Jj8808520@";
+
+    // =============================
+    // DISCORD WEBHOOK (posts to #Daily Reminder)
+    // =============================
+    const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1451822540686102639/9poM5O-vV2p7YwVKJr4Njj_ZS9a1jnqosMCgJbF4jWc-0DqO4DmrqgERTpA13LibQxNP";
 
     // =============================
     // YOU MUST FILL THESE IN
@@ -428,6 +431,76 @@
       const portions = Array.isArray(person.portions) ? person.portions : [];
       return portions.reduce((s,pt)=> s + Math.round(Number(pt.amount)||0), 0);
     }
+
+    async function postDiscord(content){
+      if(!DISCORD_WEBHOOK_URL) return;
+      try{
+        await fetch(DISCORD_WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content })
+        });
+      }catch(e){
+        console.error("Discord webhook failed:", e);
+      }
+    }
+
+    function mentionForPerson(personRecord, fallbackName){
+      const id = personRecord && personRecord.discordUserId;
+      if(id && String(id).trim()) return `<@${String(id).trim()}>`;
+      return (personRecord && personRecord.name) ? personRecord.name : (fallbackName || "Someone");
+    }
+
+    async function notifyBalanceChange(personKey, oldBal, newBal, personRecord){
+      const nameFallback = (personRecord && personRecord.name) ? personRecord.name : personKey;
+      const who = mentionForPerson(personRecord, nameFallback);
+
+      // Debt increase
+      if(newBal > oldBal){
+        const delta = newBal - oldBal;
+        if(oldBal > 0){
+          await postDiscord(`${who} Another ${money(delta)} huh? Don't get too carried away now. Your debt is now ${money(newBal)}.`);
+        } else {
+          await postDiscord(`${who} Welcome back, loyal patron! Your debt is now ${money(newBal)}!`);
+        }
+        return;
+      }
+
+      // Payment (decrease)
+      if(newBal < oldBal){
+        const paid = oldBal - newBal;
+
+        if(newBal === 0){
+          // Fully paid off
+          await postDiscord(`${who} You have paid ${money(oldBal)} out of ${money(oldBal)}. You're a free man for now.`);
+        } else {
+          // Partial payment
+          await postDiscord(`${who} You have paid ${money(paid)} out of ${money(oldBal)}. Just another ${money(newBal)} to go.`);
+        }
+      }
+    }
+
+    async function notifyDiffs(oldPeople, newPeople){
+      const keys = new Set([
+        ...Object.keys(oldPeople || {}),
+        ...Object.keys(newPeople || {})
+      ]);
+
+      for(const k of keys){
+        const oldRec = (oldPeople || {})[k];
+        const newRec = (newPeople || {})[k];
+
+        // If record disappeared (e.g., import removed it), skip to avoid weird spam.
+        if(!newRec) continue;
+
+        const oldBal = oldRec ? totalBalance(oldRec) : 0;
+        const newBal = newRec ? totalBalance(newRec) : 0;
+
+        if(oldBal === newBal) continue;
+        await notifyBalanceChange(k, oldBal, newBal, newRec);
+      }
+    }
+
     function pushLog(entry){
       state.log = Array.isArray(state.log) ? state.log : [];
       state.log.unshift(entry);
@@ -485,7 +558,7 @@
     const auth = getAuth(app);
     const stateRef = doc(db, DOC_PATH.collection, DOC_PATH.doc);
     console.log("DOC_PATH =", DOC_PATH);
-  console.log("Firestore doc path =", stateRef.path);
+    console.log("Firestore doc path =", stateRef.path);
 
     // Live read for everyone
     function startListener(){
@@ -631,15 +704,40 @@
     payDate.valueAsDate = new Date();
 
     addBtn.addEventListener("click", async () => {
+      // Snapshot old balance before mutation
+      const n = normName(person.value);
+      const k = keyFor(n);
+      const oldBal = (k && state.people && state.people[k]) ? totalBalance(state.people[k]) : 0;
+
       addPortion(person.value, amount.value, due.value, note.value);
+
+      const newBal = (k && state.people && state.people[k]) ? totalBalance(state.people[k]) : 0;
+
       await saveRemote();
+
+      // Notify based on change
+      if(k && newBal !== oldBal){
+        await notifyBalanceChange(k, oldBal, newBal, state.people[k]);
+      }
     });
 
     clearFormBtn.addEventListener("click", clearAddForm);
 
     payBtn.addEventListener("click", async () => {
+      const k = payPerson.value;
+      if(!k || !state.people || !state.people[k]) return alert("Pick a person.");
+
+      const oldBal = totalBalance(state.people[k]);
+
       applyPaymentSpecific(payPerson.value, payPortion.value, payAmount.value, payDate.value, payNote.value);
+
+      const newBal = (state.people && state.people[k]) ? totalBalance(state.people[k]) : 0;
+
       await saveRemote();
+
+      if(newBal !== oldBal){
+        await notifyBalanceChange(k, oldBal, newBal, state.people[k]);
+      }
     });
 
     payPerson.addEventListener("change", () => populatePortionsForPayment(payPerson.value));
@@ -670,14 +768,23 @@
     importFile.addEventListener("change", async () => {
       const file = importFile.files?.[0];
       if(!file) return;
+
+      // Snapshot state BEFORE import so we can diff if user pushes
+      const beforePeople = JSON.parse(JSON.stringify(state.people || {}));
+
       try{
         const txt = await file.text();
         const incoming = migrateShapeToV2(JSON.parse(txt));
         state = incoming;
         renderAdmin();
         renderView();
+
         if(confirm("Imported into this session. Push to Firebase now?")){
           await saveRemote();
+
+          // Diff notifications (multiple messages)
+          const afterPeople = state.people || {};
+          await notifyDiffs(beforePeople, afterPeople);
         }
       }catch(e){
         alert("Import failed. Make sure it's valid JSON.");
@@ -692,6 +799,8 @@
       renderAdmin();
       renderView();
       await saveRemote();
+
+      await postDiscord("The monarchy has been overthrown, everybody is now debt-free!");
     });
 
     function ensurePersonRecord(name, dueDate){
